@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Deepfake Voice Detector</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --fg: #e0e0e0;
+      --accent: #00e5ff;
+      --accent-dark: #00b8d4;
+      --card: #1e1e1e;
+      --card-alt: #2a2a2a;
+      --error: #ff5252;
+      --review: #ffd740;
+      --real: #69f0ae;
+      --fake: #ff1744;
+    }
+    body {
+      margin: 0; padding: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: var(--bg);
+      color: var(--fg);
+      display: flex; justify-content: center; align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      width: 100%; max-width: 600px;
+      background: var(--card);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      padding: 2rem;
+      position: relative;
+    }
+    h1 {
+      margin-bottom: 1rem;
+      text-align: center;
+      color: var(--accent);
+    }
+    #themeToggle {
+      position: absolute; top: 1rem; right: 1rem;
+      background: none; border: 2px solid var(--accent);
+      color: var(--accent); padding: .3rem .6rem;
+      border-radius: 4px; cursor: pointer;
+    }
+
+    /* Wobble keyframes */
+    @keyframes wobble {
+      0%,100% { transform: translateX(0); }
+      15% { transform: translateX(-8px); }
+      30% { transform: translateX(6px); }
+      45% { transform: translateX(-4px); }
+      60% { transform: translateX(2px); }
+      75% { transform: translateX(-1px); }
+    }
+
+    /* Drag & drop area */
+    #dropArea {
+      border: 2px dashed var(--accent);
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      transition: background 0.2s, box-shadow 0.2s;
+      cursor: grab;
+    }
+    #dropArea.hover {
+      background: var(--accent-dark);
+      box-shadow: 0 0 20px var(--accent);
+      cursor: grabbing;
+      animation: wobble 0.8s ease-in-out infinite;
+    }
+    #dropArea p { margin: .5rem 0; }
+    #fileInfo {
+      margin-top: .5rem;
+      font-size: .9rem;
+      color: var(--fg);
+    }
+
+    /* Waveform */
+    #waveform {
+      margin-top: 1rem;
+      width: 100%; height: 100px;
+      background: var(--card-alt);
+      border-radius: 4px;
+    }
+
+    /* Audio player */
+    audio {
+      margin-top: 1rem;
+      width: 100%;
+      outline: none;
+      border-radius: 4px;
+    }
+
+    /* Analyze button with ripple on hover */
+    .btn {
+      margin-top: 1rem; width: 100%;
+      padding: .75rem; background: var(--accent);
+      border: none; color: var(--bg);
+      font-size: 1rem; border-radius: 6px;
+      cursor: pointer; position: relative;
+      overflow: hidden; transition: background 0.2s;
+    }
+    .btn:disabled {
+      background: #555; cursor: not-allowed;
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--accent-dark);
+    }
+    .btn:hover:not(:disabled)::after {
+      content: '';
+      position: absolute; top: 50%; left: 50%;
+      width: 0; height: 0;
+      background: rgba(0,0,0,0.2);
+      border-radius: 50%;
+      transform: translate(-50%,-50%);
+      animation: ripple 0.6s linear;
+    }
+    @keyframes ripple {
+      to { width: 200%; height: 200%; opacity: 0; }
+    }
+
+    /* Spinner */
+    .spinner {
+      margin: 1rem auto; width: 36px; height: 36px;
+      border: 4px solid #333; border-top: 4px solid var(--accent);
+      border-radius: 50%; animation: spin 1s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Result box */
+    #result {
+      margin-top: 1rem; padding: .75rem;
+      border-radius: 6px; text-align: center;
+      font-size: 1rem; display: none;
+    }
+    #result.real   { background: var(--real);   color: var(--bg); }
+    #result.fake   { background: var(--fake);   color: var(--bg); }
+    #result.review { background: var(--review); color: var(--bg); }
+    #result.error  { background: var(--error);  color: var(--bg); }
+
+    /* History */
+    #history {
+      margin-top: 2rem; font-size: .85rem;
+      max-height: 150px; overflow-y: auto;
+    }
+    #history .entry {
+      padding: .5rem; border-bottom: 1px solid #333;
+      display: flex; justify-content: space-between;
+    }
+    #history .entry:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <button id="themeToggle">Light Mode</button>
+    <h1>Deepfake Voice Detector</h1>
+
+    <div id="dropArea">
+      <p>Drag & drop audio here</p>
+      <p>or click to select</p>
+      <input type="file" id="fileInput" accept="audio/*" style="display:none;">
+      <div id="fileInfo">No file chosen</div>
+    </div>
+
+    <canvas id="waveform"></canvas>
+    <audio id="audioPlayer" controls style="display:none;"></audio>
+
+    <button class="btn" id="analyzeBtn" disabled>🔍 Analyze</button>
+    <div class="spinner" id="spinner"></div>
+    <div id="result"></div>
+
+    <div id="history">
+      <h2 style="margin-bottom:.5rem;color:var(--accent)">History</h2>
+    </div>
+  </div>
+
+  <script>
+    const dropArea   = document.getElementById('dropArea'),
+          fileInput  = document.getElementById('fileInput'),
+          fileInfo   = document.getElementById('fileInfo'),
+          analyzeBtn = document.getElementById('analyzeBtn'),
+          spinner    = document.getElementById('spinner'),
+          resultBox  = document.getElementById('result'),
+          history    = document.getElementById('history'),
+          canvas     = document.getElementById('waveform'),
+          ctx        = canvas.getContext('2d'),
+          themeBtn   = document.getElementById('themeToggle');
+    let audioFile;
+
+    // Theme toggle
+    let dark = true;
+    themeBtn.onclick = () => {
+      dark = !dark;
+      document.body.style.background = dark 
+        ? 'var(--bg)' 
+        : 'radial-gradient(circle at top left, #e0f7fa, #ffffff)';
+      themeBtn.textContent = dark ? 'Light Mode' : 'Dark Mode';
+    };
+
+    // Drag & drop handlers
+    ['dragenter','dragover'].forEach(e =>
+      dropArea.addEventListener(e, ev => { ev.preventDefault(); dropArea.classList.add('hover'); })
+    );
+    ['dragleave','drop'].forEach(e =>
+      dropArea.addEventListener(e, ev => { ev.preventDefault(); dropArea.classList.remove('hover'); })
+    );
+    dropArea.addEventListener('click', () => fileInput.click());
+    dropArea.addEventListener('drop', e => {
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.onchange = () => { if (fileInput.files.length) handleFile(fileInput.files[0]); };
+
+    function handleFile(file) {
+      if (!file.type.startsWith('audio/')) return alert('Select an audio file.');
+      audioFile = file;
+      fileInfo.textContent = `${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+      analyzeBtn.disabled = false;
+      drawWaveform(file);
+      // show audio player
+      const reader = new FileReader();
+      reader.onload = evt => {
+        document.getElementById('audioPlayer').src = evt.target.result;
+        document.getElementById('audioPlayer').style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function drawWaveform(file) {
+      const reader = new FileReader();
+      reader.onload = evt => {
+        const ac = new (window.AudioContext||webkitAudioContext)();
+        ac.decodeAudioData(evt.target.result).then(buf => {
+          const data = buf.getChannelData(0);
+          canvas.width = dropArea.clientWidth - 2;
+          canvas.height = 100;
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+          ctx.fillStyle = '#333';
+          const step = Math.ceil(data.length / canvas.width);
+          for (let i=0; i<canvas.width; i++) {
+            const min = Math.min(...data.slice(i*step, (i+1)*step));
+            const max = Math.max(...data.slice(i*step, (i+1)*step));
+            const y1 = (1+min)*canvas.height/2;
+            const y2 = (1+max)*canvas.height/2;
+            ctx.fillRect(i, y1, 1, y2-y1);
+          }
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    analyzeBtn.onclick = () => {
+      if (!audioFile) return;
+      resultBox.style.display = 'none';
+      spinner.style.display   = 'block';
+      analyzeBtn.disabled     = true;
+
+      const form = new FormData();
+      form.append('audio', audioFile);
+
+      fetch('/predict', { method:'POST', body: form })
+        .then(r => r.json())
+        .then(data => {
+          spinner.style.display   = 'none';
+          analyzeBtn.disabled     = false;
+          resultBox.style.display = 'block';
+          if (data.error) {
+            resultBox.className = 'result error';
+            resultBox.textContent = data.error;
+          } else {
+            resultBox.className = 'result ' + data.prediction.toLowerCase();
+            resultBox.textContent = 'Prediction: ' + data.prediction;
+            // history
+            const div = document.createElement('div');
+            div.className = 'entry';
+            div.innerHTML = `<span>${audioFile.name}</span><span>${data.prediction}</span>`;
+            history.appendChild(div);
+          }
+        })
+        .catch(err => {
+          spinner.style.display   = 'none';
+          analyzeBtn.disabled     = false;
+          resultBox.style.display = 'block';
+          resultBox.className     = 'result error';
+          resultBox.textContent   = 'An unexpected error occurred.';
+          console.error(err);
+        });
+    };
+  </script>
+</body>
+</html>
